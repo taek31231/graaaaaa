@@ -9,10 +9,9 @@ st.title("미세중력렌즈 시뮬레이션")
 
 # --- 설정값 ---
 st.sidebar.header("시뮬레이션 설정")
-orbital_period = st.sidebar.slider("행성 공전 주기 (프레임 수)", 200, 1000, 400, key="period_slider") # 주기 늘림
-# 행성 질량비를 더욱 현실적인 범위로 조정 (지구~목성)
-# 목성 질량비 ~ 0.001 (태양=1), 지구 질량비 ~ 0.000003 (태양=1)
-planet_mass_ratio = st.sidebar.slider("행성 질량비 (중심별=1)", 0.000001, 0.0015, 0.0001, format="%.7f", key="mass_ratio_slider")
+orbital_period = st.sidebar.slider("행성 공전 주기 (프레임 수)", 200, 1000, 400, key="period_slider")
+# 행성 질량비 범위 조정: 더 현실적인 값으로 (목성급: 0.001, 지구급: 0.000003)
+planet_mass_ratio = st.sidebar.slider("행성 질량비 (중심별=1)", 0.000001, 0.002, 0.0001, format="%.7f", key="mass_ratio_slider") # 목성 0.001
 observer_angle_deg = st.sidebar.slider("관찰자 시선 방향 (도)", 0, 360, 90, key="observer_angle_slider")
 st.sidebar.markdown("---")
 st.sidebar.info("💡 **팁:** 'Play' 버튼을 누르거나 아래 슬라이더를 움직여 애니메이션을 제어하세요.")
@@ -22,220 +21,121 @@ R_STAR = 0.5  # 중심별 시각적 반지름 (단위)
 R_ORBIT = 5.0  # 행성 궤도 반지름 (단위)
 R_OBSERVER_DIST = 10.0 # 관찰자의 중심별로부터의 거리 (시각화용)
 
-# --- 미세중력렌즈 광도 계산 함수 (현실적 스케일 및 단일 피크) ---
+# --- 미세중력렌즈 광도 계산 함수 (재수정) ---
 def calculate_magnification(planet_pos, observer_pos, star_pos, planet_mass_ratio):
-    # microlensing magnification A = (u^2 + 2) / (u * sqrt(u^2 + 4))
-    # where u = impact_parameter / Einstein_radius
+    magnification = 1.0 # 기본 광도
 
-    magnification = 1.0 # 기본 광도 (증폭 없음)
-
-    # 1. 아인슈타인 반경 (Einstein Radius, R_E) 계산
-    # R_E는 렌즈(행성)의 질량, 렌즈-광원 거리, 관찰자-광원 거리에 따라 달라짐
-    # 여기서 D_L: observer-lens, D_S: observer-source, D_LS: lens-source
-    # theta_E = sqrt(4 G M_L / c^2 * (D_L * D_LS / D_S))
-
-    # 시뮬레이션 스케일에 맞게 조정된 아인슈타인 반경 프록시 (시각적 효과 및 계산 편의)
-    # 실제 목성 질량비 0.001 (태양=1)일 때의 아인슈타인 반경에 비례하도록 스케일링
-    # 이 값은 렌즈 효과의 "폭"을 결정합니다.
-    # 예시 값: 0.005 정도로 설정하면 더 좁은 피크가 가능
-    
-    # 0.001 질량비 (목성)일 때 시뮬레이션 단위계에서 아인슈타인 반경이 약 0.005라고 가정
-    # 다른 질량비에 대해 sqrt(질량비)에 비례하여 조정
-    einstein_radius_visual_proxy = 0.005 * np.sqrt(planet_mass_ratio / 0.001) 
-    
-    if einstein_radius_visual_proxy <= 0: return 1.0 # 질량비가 0이면 증폭 없음
-
-    # 2. 충격 매개변수 (Impact Parameter) 'd_perp' 계산
-    # 관찰자-광원(중심별) 시선 (line of sight)을 기준으로 행성(렌즈)이 얼마나 떨어져 있는가
-    
     # 관찰자-중심별 시선 벡터
     line_of_sight_vec = np.array(star_pos) - np.array(observer_pos)
     line_of_sight_unit = line_of_sight_vec / np.linalg.norm(line_of_sight_vec)
 
-    # 행성 위치에서 관찰자-중심별 시선까지의 수직 거리 (이것이 impact parameter)
-    vec_op = np.array(planet_pos) - np.array(observer_pos) # 관찰자에서 행성으로의 벡터
-    proj_length = np.dot(vec_op, line_of_sight_unit) # 시선 방향으로의 투영 길이
-    
-    # 시선 상의 행성으로부터 가장 가까운 점 (Closest Point on Line of Sight)
+    # 행성 위치에서 관찰자-중심별 시선까지의 수직 거리 (impact parameter)
+    vec_op = np.array(planet_pos) - np.array(observer_pos)
+    proj_length = np.dot(vec_op, line_of_sight_unit)
     closest_point_on_los = np.array(observer_pos) + proj_length * line_of_sight_unit
-    
-    # 행성 실제 위치와 시선 상의 가장 가까운 점 사이의 거리 (수직 거리)
     perpendicular_dist = np.linalg.norm(np.array(planet_pos) - closest_point_on_los)
+
+    # 아인슈타인 반경 프록시 (시각적 효과 조절, 질량비에 비례)
+    # 이 값을 조절하여 렌즈 효과의 폭과 강도를 미세 조정할 수 있습니다.
+    # 목성 질량비(0.001)일 때 0.005 정도가 적절한 시작점.
+    einstein_radius_visual_proxy = 0.005 * np.sqrt(planet_mass_ratio / 0.001) # 목성 질량비를 기준으로 스케일링
     
-    # 3. 정규화된 충격 매개변수 'u' 계산
-    u = perpendicular_dist / einstein_radius_visual_proxy
+    if einstein_radius_visual_proxy <= 0: return 1.0
 
-    # 4. 광도 증폭 계산 (A = (u^2 + 2) / (u * sqrt(u^2 + 4)))
-    # u가 0에 가까워질수록 A는 무한대로 발산
-    # 이를 방지하고 현실적인 최대 증폭값을 설정
-    if u < 0.0001: # u가 매우 작을 때 (거의 완벽한 정렬)
-        u = 0.0001 # 최소 u 값 설정하여 발산 방지
+    u = perpendicular_dist / einstein_radius_visual_proxy # 정규화된 충격 매개변수
+
+    # 핵심: 정렬 조건 (단일 피크 보장)
+    # 행성이 관찰자와 중심별 사이를 지날 때만 증폭이 일어나도록 합니다.
+    # 즉, 행성의 위치가 시선 벡터 방향으로 중심별보다 관찰자에 가까워야 합니다.
+    # (proj_length가 양수여야 하며, 행성이 중심별보다 관찰자쪽에 가까이 있을 때만 유효)
     
-    magnification = (u**2 + 2) / (u * np.sqrt(u**2 + 4))
+    # 이 조건은 행성이 시선 경로를 지나갈 때만 활성화됩니다.
+    # proj_length는 관찰자로부터 시선 방향으로의 행성 투영 거리.
+    # 0 < proj_length < np.linalg.norm(line_of_sight_vec) (대략적으로)
+    # 즉, 행성이 관찰자-중심별 사이의 구간에 있을 때.
     
-    # 5. 광도 증폭 스케일링 및 단일 피크 보장
-    # 실제 행성(목성, 지구 등)에 의한 미세중력렌즈 효과는 1%~수십% 정도로 매우 작음.
-    # 이를 반영하여 'magnification - 1.0' (순수 증폭량)을 다시 스케일링.
+    # 더 간단하게, 행성의 위치가 중심별과 관찰자 사이의 특정 '정렬 영역' 안에 있을 때만 피크를 만듭니다.
+    # 행성(렌즈)이 시선 상에 광원(중심별)과 관찰자 사이에 놓여야 합니다.
     
-    # 기본적으로 목성 질량비(0.001)일 때 최대 20% 증폭 (1.2배) 정도로 보이게 설정
-    # 이 스케일링 값 (200)은 시각적 효과를 위해 조정 가능
-    base_magnification_factor = 200.0 # 이 값을 조정하여 증폭의 스케일을 조절
+    # Check if the planet is "in front" of the star from the observer's perspective
+    # This ensures only one peak per orbit when passing the line of sight.
     
-    magnification = 1.0 + (magnification - 1.0) * (planet_mass_ratio / 0.001) * base_magnification_factor
+    # Calculate angular position of planet relative to star, and compare to observer's line of sight
+    # Use atan2 for full 360 degree angle
+    planet_angle_from_star = np.arctan2(planet_pos[1], planet_pos[0])
     
-    # 행성이 관찰자 시선에 매우 가깝지 않으면 증폭 없음 (단일 피크 보장)
-    # 즉, 행성이 아인슈타인 반경 프록시의 몇 배 이상 벗어나면 증폭을 1로 초기화
-    if u > 3.0: # u가 이 값보다 크면 거의 증폭이 없음 (u=1일 때 A=1.34, u=2일 때 A=1.19)
-        magnification = 1.0
-        
-    return max(1.0, magnification) # 광도는 1.0 미만이 될 수 없음
+    # Normalize angles to be within [0, 2*pi)
+    planet_angle_from_star = (planet_angle_from_star + 2 * np.pi) % (2 * np.pi)
+    observer_angle_rad_norm = (observer_angle_rad + 2 * np.pi) % (2 * np.pi)
 
-# --- 데이터 준비 ---
-frames_data = []
-lightcurve_current_frame_data = [] # 각 프레임마다의 광도 데이터를 저장할 리스트
-times = np.arange(orbital_period)
+    # Define a small angular window around the observer's line of sight
+    # This window defines *when* the microlensing event can occur.
+    # A smaller window leads to a sharper, single peak.
+    angular_window_rad = np.radians(5) # 5도 정도의 좁은 각도 범위
+    
+    # Check if the planet's angle is within this window relative to observer's angle OR observer's angle + pi (for opposite side)
+    # To get a single peak, we need to ensure the planet is on the "correct" side of the star relative to the observer.
+    
+    # Simplified check for "alignment":
+    # The event happens when the planet crosses the line segment between observer and star.
+    # This means the perpendicular_dist (u) is small AND the planet is 'between' observer and star
+    # in terms of projected position along the line of sight.
+    
+    # if u is small, it implies proximity to the line of sight.
+    # now, let's filter for the specific half-orbit where it should occur.
+    
+    # Check if planet is on the same side of the star as the observer's projection,
+    # and if it's "ahead" of the star along the observer's line of sight
+    
+    # dot_product = np.dot(planet_pos, line_of_sight_unit)
+    # If dot_product is positive, planet is in the general direction of star from observer.
+    # To ensure it's *between* observer and star, it gets complicated for orbital motion.
+    
+    # Let's simplify and make sure the "peak-causing" region is just one side.
+    # We will rely on 'u' being small, and then add a condition based on the relative angle.
+    
+    angle_diff_to_observer_line = np.abs(planet_angle_from_star - observer_angle_rad_norm)
+    # Normalize angle_diff to be between 0 and pi
+    if angle_diff_to_observer_line > np.pi:
+        angle_diff_to_observer_line = 2 * np.pi - angle_diff_to_observer_line
 
-# 관찰자 위치 계산 (고정)
-observer_angle_rad = np.radians(observer_angle_deg)
-observer_x = R_OBSERVER_DIST * np.cos(observer_angle_rad)
-observer_y = R_OBSERVER_DIST * np.sin(observer_angle_rad)
-observer_pos = (observer_x, observer_y)
-star_pos = (0, 0) # 중심별은 항상 (0,0)에 고정
+    # The actual physical condition for a single peak:
+    # The event occurs when the planet passes through the Einstein cone/tube
+    # This naturally leads to a single peak if the source is not binary.
+    # The double peak usually comes from approximating the source as passing "behind" the lens from observer's perspective
+    # for each side of the lens.
 
-# 모든 프레임의 광도 값을 미리 계산하여 Y축 범위 설정 및 애니메이션 데이터 준비
-all_magnifications = []
-for t_val in times:
-    angle_val = 2 * np.pi * t_val / orbital_period
-    planet_x_val = R_ORBIT * np.cos(angle_val)
-    planet_y_val = R_ORBIT * np.sin(angle_val)
-    all_magnifications.append(calculate_magnification(
-        (planet_x_val, planet_y_val), observer_pos, star_pos, planet_mass_ratio
-    ))
+    # Let's try to enforce a single specific angular window for the peak
+    # For example, if observer is at 90 deg (positive Y axis), the alignment happens when planet is roughly on negative Y axis.
+    # The planet passes through the "line of sight" from observer to star.
+    
+    # To get single peak: the planet's x coordinate should align with star's x coordinate
+    # (assuming observer is on y-axis, star at origin)
+    # Or more generally: The component of planet_pos along the perpendicular to LOS should be small
+    # AND the component along LOS should be between observer and star.
+    
+    # A simpler way to get single peak: only allow amplification if the planet's position is "behind" the observer's
+    # line relative to the star.
+    # If observer is at (obs_x, obs_y) and star is at (0,0)
+    # The planet (px, py) is "between" if (px - obs_x) has opposite sign to (0 - obs_x) AND (py - obs_y) opposite sign to (0 - obs_y)
+    # This is still not robust for orbital motion.
 
-# Y축 범위 미리 설정 (실제 계산된 광도 값을 기반으로)
-min_mag = min(all_magnifications) * 0.95
-max_mag = max(all_magnifications) * 1.05
-if max_mag < 1.02: max_mag = 1.02 # 최소한 2% 증폭은 보이도록 (더 현실적인 스케일)
-if min_mag > 0.98: min_mag = 0.98 # 최소한 2%는 보이도록
-
-# --- 초기 그래프 생성 ---
-fig = make_subplots(rows=1, cols=2,
-                    subplot_titles=("행성 공전 시뮬레이션", "미세중력렌즈 광도 변화"),
-                    specs=[[{'type': 'xy'}, {'type': 'xy'}]])
-
-# 1. 공전 시뮬레이션 서브플롯 (왼쪽, x1, y1)
-# Trace 0: 중심별
-fig.add_trace(go.Scatter(x=[star_pos[0]], y=[star_pos[1]], mode='markers',
-                         marker=dict(size=20, color='gold'),
-                         name='중심별'), row=1, col=1)
-# Trace 1: 행성 (초기 위치)
-fig.add_trace(go.Scatter(x=[R_ORBIT * np.cos(0)], y=[R_ORBIT * np.sin(0)], mode='markers',
-                         marker=dict(size=8, color='blue'),
-                         name='행성'), row=1, col=1)
-
-# Trace 2: 관찰자 위치
-fig.add_trace(go.Scatter(x=[observer_x], y=[observer_y], mode='markers',
-                         marker=dict(size=10, color='purple', symbol='star'),
-                         name='관찰자'), row=1, col=1)
-# Trace 3: 관찰자 시선
-fig.add_trace(go.Scatter(x=[observer_x, star_pos[0]], y=[observer_y, star_pos[1]],
-                         mode='lines', line=dict(color='red', dash='dash'),
-                         name='관찰자 시선'), row=1, col=1)
-
-fig.update_xaxes(range=[-R_ORBIT * 1.2, R_ORBIT * 1.2], title_text="X 좌표", row=1, col=1)
-fig.update_yaxes(range=[-R_ORBIT * 1.2, R_ORBIT * 1.2], scaleanchor="x", scaleratio=1, title_text="Y 좌표", row=1, col=1)
-fig.update_layout(showlegend=True, legend=dict(x=0.01, y=0.99))
-
-# 2. 광도 변화 서브플롯 (오른쪽, x2, y2)
-# Trace 4: 광도 그래프 (초기 데이터)
-fig.add_trace(go.Scatter(x=[0], y=[all_magnifications[0]], mode='lines',
-                         line=dict(color='green'),
-                         name='광도'), row=1, col=2)
-
-fig.update_xaxes(range=[0, orbital_period], title_text="시간 (프레임)", row=1, col=2)
-fig.update_yaxes(range=[min_mag, max_mag],
-                 title_text="상대 광도", row=1, col=2)
-
-# --- 애니메이션 프레임 데이터 구성 ---
-for t in times:
-    angle = 2 * np.pi * t / orbital_period
-    planet_x = R_ORBIT * np.cos(angle)
-    planet_y = R_ORBIT * np.sin(angle)
-
-    # 현재 프레임의 광도 값 (미리 계산된 all_magnifications에서 가져옴)
-    current_magnification = all_magnifications[t]
-    lightcurve_current_frame_data = all_magnifications[:t+1] # 현재 프레임까지의 광도 데이터
-
-    # 각 프레임에 대한 데이터 저장 (모든 트레이스를 명시적으로 다시 정의)
-    frames_data.append({
-        'data': [
-            # Trace 0: 중심별 (왼쪽 그래프)
-            go.Scatter(x=[star_pos[0]], y=[star_pos[1]], mode='markers', marker=dict(size=20, color='gold'), showlegend=True, name='중심별'),
-            # Trace 1: 행성 (왼쪽 그래프, 위치 업데이트)
-            go.Scatter(x=[planet_x], y=[planet_y], mode='markers', marker=dict(size=8, color='blue'), showlegend=True, name='행성'),
-            # Trace 2: 관찰자 (왼쪽 그래프)
-            go.Scatter(x=[observer_x], y=[observer_y], mode='markers', marker=dict(size=10, color='purple', symbol='star'), showlegend=True, name='관찰자'),
-            # Trace 3: 관찰자 시선 (왼쪽 그래프)
-            go.Scatter(x=[observer_x, star_pos[0]], y=[observer_y, star_pos[1]], mode='lines', line=dict(color='red', dash='dash'), showlegend=True, name='관찰자 시선'),
-            # Trace 4: 광도 그래프 (오른쪽 그래프, 데이터 업데이트)
-            go.Scatter(x=times[:t+1], y=lightcurve_current_frame_data, mode='lines', line=dict(color='green'), showlegend=True, name='광도', xaxis='x2', yaxis='y2')
-        ],
-        'name': f'frame_{t}'
-    })
-
-
-# --- 애니메이션 설정 ---
-fig.frames = [go.Frame(data=frame['data'], name=frame['name']) for frame in frames_data]
-
-# 애니메이션 재생/일시정지 버튼 설정
-fig.update_layout(
-    updatemenus=[
-        dict(
-            type="buttons",
-            showactive=False,
-            x=0.01,
-            y=1.05,
-            buttons=[
-                dict(label="▶ Play",
-                     method="animate",
-                     args=[None, {"frame": {"duration": 50, "redraw": True}, "fromcurrent": True}]),
-                dict(label="⏸ Pause",
-                     method="animate",
-                     args=[[None], {"frame": {"duration": 0, "redraw": False}, "mode": "immediate", "transition": {"duration": 0}}])
-            ]
-        )
-    ]
-)
-
-# 타임라인 슬라이더 설정
-sliders = [
-    dict(
-        steps=[
-            dict(
-                method="animate",
-                args=[
-                    [f"frame_{t}"],
-                    {"mode": "immediate", "frame": {"duration": 50, "redraw": True}, "transition": {"duration": 0}}
-                ],
-                label=str(t)
-            ) for t in times
-        ],
-        transition={"duration": 0},
-        x=0.08,
-        y=0,
-        currentvalue={"font": {"size": 12}, "prefix": "프레임: ", "visible": True},
-        len=0.92,
-    )
-]
-fig.update_layout(sliders=sliders)
-
-# --- Streamlit 앱에 Plotly 그래프 표시 ---
-st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("---")
-st.subheader("시뮬레이션 설명:")
-st.markdown("""
-- **왼쪽 그래프**: 항성(노란색) 주위를 공전하는 행성(파란색)을 보여줍니다. 보라색 별은 관찰자의 위치이며, 붉은 점선은 관찰자로부터 항성으로 향하는 시선 방향을 나타냅니다.
-- **오른쪽 그래프**: 시간에 따른 항성의 상대 광도 변화를 나타냅니다. 행성이 관찰자와 항성 사이를 지나가면서 미세중력렌즈 효과에 의해 항성의 광도가 일시적으로 증가하는 것을 시뮬레이션합니다.
-- **광도 계산**: `calculate_magnification` 함수를 개선하여 **관찰자와 중심별 사이를 행성이 지나갈 때만 광도가 증가**하도록 설정했으며, **단일 피크**가 나타나도록 조건을 조정했습니다. 또한, **행성의 질량비에 따른 현실적인 광도 변화 스케일**을 반영했습니다 (대략 수십 퍼센트 이내).
-""")
+    # Let's use the current 'u' and add a filter for a half-orbit.
+    # Example: If observer is at 90 deg (positive Y), alignment happens when planet's y < 0 (negative y axis)
+    # This ensures it passes 'through' the star's line of sight on one side.
+    
+    # This condition is crucial for single peak.
+    # If observer_angle_deg is 90 (looking towards 0,0 from +Y), planet_pos[1] should be negative (passing 'behind' star)
+    # Generalizing: angle between line_of_sight_unit and vec_op should be close to 180 degrees.
+    
+    # Dot product of (planet_pos - star_pos) and line_of_sight_unit
+    # This checks if the planet is "behind" the star from the observer's perspective.
+    # If this dot product is negative (planet is behind the star), the peak can occur.
+    
+    # Vector from star to planet
+    vec_sp = np.array(planet_pos) - np.array(star_pos)
+    
+    # Dot product between star-planet vector and observer-star vector
+    # If they are roughly opposite, planet is "behind" the star from observer's view point.
+    # This is a critical filter for the "single peak"
+    alignment
